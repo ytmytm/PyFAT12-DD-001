@@ -72,6 +72,10 @@ Here are some comments that may help you initially. Your mileage may vary.
 - The cartridge should have a RESET button
 - Ideally the cartridge should have at least 16K of ROM for proper support of FAT12 filesystem and CBM DOS-style commands
 - Ideally the cartridge should also have at least 16K of RAM to read whole track (both sides) at once and keep FAT in memory at all times
+- Jumpers to control motor/drive select signals should make it possible to use 2-drive setup
+- RESET button is desperately needed
+- Cartridge should have jumpers/latches to release Expansion port signals so that on a C128 we can enter native C128 mode
+- on C128 an internal Function ROM with all the needed features
 
 ## Firmware flaws
 
@@ -86,6 +90,7 @@ disappointment is deeply flawed firmware which seems rushed and unfinished with 
 - file-level access is not supported, you can only LOAD and SAVE
 - command channel is not supported, CBM DOS commands: N (format), S (scratch, delete), R (rename) commands are not supported (V (validate) command makes no sense for FAT, but could do some
   integrity checking for FAT data)
+- with larger ROM at least DOS wedge ('@' commands for disk drives) should be included, as well as open-source LOAD replacement with JiffyDOS protocol
 
 Long filenames are not supported, but it's not a flaw - VFAT was not invented yet when DD-001 was released.
 
