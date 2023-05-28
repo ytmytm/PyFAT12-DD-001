@@ -441,7 +441,7 @@ class FAT12:
                     while len(entries) < num_entries:
                         entries.append(b"\0" * 32)
                     entries.insert(0, self._makedirentry(
-                        self._label, 8, None, 0, 0))
+                        self._label, 8, None, 0, 0, 0))
                     if len(entries) * 32 <= len(rootdir):
                         for i, entry in enumerate(entries):
                             rootdir[i * 32: i * 32 + 32] = entry
@@ -816,7 +816,7 @@ class FAT12:
         if name in [".", ".."]:
             raise ValueError("cannot create dotfile")
         now = datetime.datetime.now()
-        direntry = self._makedirentry(name, 0x20, None, 0, 0)
+        direntry = self._makedirentry(name, 0x20, None, 0, 0, 0)
         dcluster, ocluster, offset = self._allocdirentry(cluster, 0)
         self._writedirentry(ocluster, offset, direntry)
         return (cluster, ocluster, offset)
@@ -833,12 +833,12 @@ class FAT12:
             name = fat12path.basename(path)
             self._writedirentry(
                 ocluster, offset, self._makedirentry(
-                    name, 16, None, ncluster, 0)
+                    name, 16, None, ncluster, 0, 0)
             )
             self._writedirentry(
-                ncluster, 0, self._makedirentry(b".", 16, None, 0, 0))
+                ncluster, 0, self._makedirentry(b".", 16, None, 0, 0, 0))
             self._writedirentry(
-                ncluster, 32, self._makedirentry(b"..", 16, None, 0, 0))
+                ncluster, 32, self._makedirentry(b"..", 16, None, 0, 0, 0))
             if chdir:
                 self._dircluster = ncluster
         return (cluster, ocluster, offset)
@@ -980,7 +980,7 @@ class FAT12:
             raise FileNotFoundError(path)
         return self._readfile(fcluster, foffset, with_load_address)
 
-    def _writefile(self, fcluster, foffset, contents, ignore_readonly):
+    def _writefile(self, fcluster, foffset, contents, ignore_readonly, with_load_address=True):
         bps = self.bytes_per_sector
         bpc = bps * self.sectors_per_cluster
         (
@@ -1007,6 +1007,13 @@ class FAT12:
                 return
             cluster = self._alloccluster(None)
             file_clusters = 1
+
+        # load address? shift data by 2
+        if with_load_address:
+            load_address = contents[0] + contents[1]*256
+            contents = contents[2:]
+        else:
+            load_address = 0
 
         # last cluster of file
         lcluster = cluster
@@ -1049,19 +1056,20 @@ class FAT12:
         )
         self.commit()
 
-    def write_file(self, path, contents, ignore_readonly=False):
+    def write_file(self, path, contents, ignore_readonly=False, with_load_address=True):
         """Writes the contents of a file. If the file does not exist, it will be created.
 
         Arguments:
         path -- the file path
         ignore_readonly -- ignores the read-only flag in the file (default: False)
+        with_load_address -- use first two bytes of contents as load address (default: True)
         """
         cluster, fcluster, foffset = self._resolvepath(path, False)
         if cluster is None:
             cluster, fcluster, foffset = self._createfile(path, False)
         if cluster is None:
             raise FileNotFoundError(path)
-        self._writefile(fcluster, foffset, contents, ignore_readonly)
+        self._writefile(fcluster, foffset, contents, ignore_readonly, with_load_address)
 
     def set_attributes(self, path, attrib):
         """Sets file attributes.
