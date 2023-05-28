@@ -59,10 +59,11 @@ Here are some comments that may help you initially. Your mileage may vary.
   was not accessible, even with its jumper set to DS0. With DS1 nothing worked, with DS0 setting the LED blinked
   like for access, but motor didn't turn. I think this is a design problem and there should be a full set of jumpers
   on the cartridge side
-- I used standard PC HD FDD, with HD floppies. The provided firmware can't format HD floppies. It only returned 'DISK NOT RELIABLE' error for me. 
-  I had to cover HD hole on all the floppies even though they were in fact HD, not DD.
-  HD floppies (with open hole) formatted as 720K DD on a PC were not read reliably by DD-001. Only after
-  covering the HD hole and formatting it again on PC with exactly the same settings (720K DD) it worked fine.
+- I used standard PC HD FDD, with HD floppies. The provided firmware can't format HD floppies as-is. It only returned 'DISK NOT RELIABLE' error for me. 
+  I had to cover HD hole on all the floppies even though the media inside and drive mechanism were in fact HD, not DD.
+  HD floppies (with open hole) formatted as 720K DD on a PC could not be read reliably by DD-001.
+  Only after covering the HD hole and formatting them again on PC with exactly the same settings (720K DD) it worked fine.
+  Conclusion: **always cover the HD hole**.
 - If there is no floppy in the drive the firmware will try to read it for several seconds until displaying a message.
   That's the only time when you can hit RUN/STOP key to regain control and enter BASIC
 - If there is a DD-formatted floppy in the drive, without BOOT.EXE file firmware will give up immediately
@@ -88,11 +89,11 @@ disappointment is deeply flawed firmware which seems rushed and unfinished with 
 
 Long filenames are not supported, but it's not a flaw - VFAT was not invented yet when DD-001 was released.
 
-# Using PyFAT12
+# Using PyFAT12 for DD-001 disk images
 
 For reading files look at example from `dd-001-boot-convert-to-d81.py`:
 
-```
+```python3
 from pyfat12 import FloppyImage, FAT12
 floppy = FloppyImage(size=3.5, capacity=720)
 floppy.open("test0.img")
@@ -106,17 +107,21 @@ with open("file.seq","wb") as f:
 
 ```
 
+Here we read `BOOT.EXE` from the disk image and save it to `file.prg` preserving load address in the first two bytes.
 
-There is no support for 720K DD image formatting in the library, use shell commands for that:
+Then we read `FILE.TXT` from the disk image and save it without changes as `file.seq`.
 
-```
+
+There is no support for 720K DD image formatting in the library, use shell commands instead:
+
+```sh
 dd if=/dev/zero of=test.img bs=512 count=1440
 mkfs.vfat -F 12 -r 112 -f 2 -s 2 test.img
 ```
 
-Then you can write files on to that image and save the result under new name:
+Then you can write files to that image and save the result under a new name:
 
-```
+```python3
 from pyfat12 import FloppyImage, FAT12
 floppy = FloppyImage(size=3.5, capacity=720)
 floppy.open("test0.img")
@@ -132,10 +137,10 @@ with open("BOOT.PRG","rb") as f:
 floppy.save("test0-done.img")
 ```
 
-Note that `HELLO.TXT` doesn't have load address and its contents will start with characters 'Hello'.
+Note that `HELLO.TXT` doesn't have a load address and its contents will start with characters 'Hello'.
 
-Note that `BOOT.PRG` has load address (`with_load_address=True` is default) and its first two bytes are interpreted as the load address and removed from file contents.
-If you try to read this file back in Windows/Linux this information will be lost.
+Note that `BOOT.PRG` has load address parameter (`with_load_address` is `True` by default) so its first two bytes are interpreted as the load address and removed from file contents.
+If you try to read this file back in Windows/Linux this information will be lost. It can be only extracted by reading file through `fs.read_file` with `with_load_address` option set to `True`.
 
 # *Original notes for PyFAT12 author follow*
 
