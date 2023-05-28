@@ -1,6 +1,6 @@
 
 import io
-
+import pdb
 
 class FloppyImage:
     """Represents a floppy image.
@@ -39,8 +39,10 @@ class FloppyImage:
         self.bytes_per_sector = 512
         self._data = bytearray(self.capacity)
 
-    @staticmethod
-    def open(file):
+    def __repr__(self):
+        return f"<FloppyImage size={self.size}, bytes_per_sector={self.bytes_per_sector}, capacity={self.capacity}>"
+
+    def open(self, file):
         """Opens an existing floppy image.
 
         Arguments:
@@ -48,17 +50,12 @@ class FloppyImage:
         """
 
         if isinstance(file, io.IOBase):
-            self = FloppyImage.__new__(FloppyImage)
             self._data = bytearray(file.read())
             self.capacity = len(self._data)
-            if self.capacity != 1440 * 1024:
-                raise NotImplementedError()
-            self.size = 3.5
-            self.bytes_per_sector = 512
             return self
         elif isinstance(file, str):
             with open(file, "rb") as f:
-                return FloppyImage.open(f)
+                return self.open(f)
         else:
             raise TypeError("file")
 

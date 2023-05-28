@@ -3,7 +3,7 @@ import datetime
 import os
 import struct
 from . import path as fat12path
-
+import pdb
 
 class FAT12:
     """Represents a FAT12 file system on a floppy image.
@@ -144,8 +144,8 @@ class FAT12:
             raise ValueError("invalid FAT count")
         if (
             bytes_per_sector != 512
-            or sectors_per_cluster != 1
-            or descriptor != 0xF0
+            or sectors_per_cluster not in [ 1, 2 ]
+            or descriptor not in [ 0xF0, 0xF9 ]
             or root_entries % 16 != 0
         ):
             raise NotImplementedError()
@@ -195,7 +195,8 @@ class FAT12:
             (pair,) = struct.unpack("<I", data[i: i + 3] + b"\0")
             self._fat.append(pair & 0xFFF)
             self._fat.append((pair >> 12) & 0xFFF)
-        assert self._fat[0] == 0xFF0
+
+        assert self._fat[0] in [ 0xFF0, 0xFF9 ]
         assert self._fat[1] == 0xFFF
         self._root_dir_sector = (
             self.fat_start_sector + self.sectors_per_fat * self.fat_count
@@ -203,9 +204,10 @@ class FAT12:
         self._first_cluster_sector = self._root_dir_sector + \
             (self.root_entries // 16)
         self._first_cluster_sector -= 2 * self.sectors_per_cluster
-        self._first_cluster_sector = (
-            self._first_cluster_sector + (self.sectors_per_cluster - 1)
-        ) // self.sectors_per_cluster
+        # ytm: don't know what that was about? for 1.44MB images?
+#        self._first_cluster_sector = (
+#            self._first_cluster_sector + (self.sectors_per_cluster - 1)
+#        ) // self.sectors_per_cluster
 
     def _readfs(self):
         self._readbpb()
