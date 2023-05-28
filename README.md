@@ -88,9 +88,56 @@ disappointment is deeply flawed firmware which seems rushed and unfinished with 
 
 Long filenames are not supported, but it's not a flaw - VFAT was not invented yet when DD-001 was released.
 
-# 
+# Using PyFAT12
 
-Original notes for PyFAT12 author follow
+For reading files look at example from `dd-001-boot-convert-to-d81.py`:
+
+```
+from pyfat12 import FloppyImage, FAT12
+floppy = FloppyImage(size=3.5, capacity=720)
+floppy.open("test0.img")
+fs = FAT12(floppy)
+
+with open("file.prg","wb") as f:
+    f.write(fs.read_file("/BOOT.EXE", with_load_address=True))
+
+with open("file.seq","wb") as f:
+    f.write(fs.read_file("/FILE.TXT", with_load_address=False))
+
+```
+
+
+There is no support for 720K DD image formatting in the library, use shell commands for that:
+
+```
+dd if=/dev/zero of=test.img bs=512 count=1440
+mkfs.vfat -F 12 -r 112 -f 2 -s 2 test.img
+```
+
+Then you can write files on to that image and save the result under new name:
+
+```
+from pyfat12 import FloppyImage, FAT12
+floppy = FloppyImage(size=3.5, capacity=720)
+floppy.open("test0.img")
+fs = FAT12(floppy)
+
+# standard SEQ file, without load address
+fs.write_file("/HELLO.TXT", b"Hello World!\r\n", with_load_address=False)
+
+# standard PRG file, with load address
+with open("BOOT.PRG","rb") as f:
+    fs.write_file("/BOOT.PRG", f.read())
+
+floppy.save("test0-done.img")
+```
+
+Note that `HELLO.TXT` doesn't have load address and its contents will start with characters 'Hello'.
+
+Note that `BOOT.PRG` has load address (`with_load_address=True` is default) and its first two bytes are interpreted as the load address and removed from file contents.
+If you try to read this file back in Windows/Linux this information will be lost.
+
+# *Original notes for PyFAT12 author follow*
 
 # PyFAT12
 
