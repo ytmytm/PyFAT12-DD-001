@@ -347,23 +347,30 @@ class FAT12:
         )
         return struct.pack("<I", i)
 
-    # (exists, filename, attributes, modified, cluster, file_size)
+    # (exists, filename, attributes, modified, cluster, file_size, load address)
     #   exists = (True = file, False = free entry, None = end of directory)
     def _parsedirentry(self, data):
         if data[0] == 0:
-            return (None, None, None, None, None, None)
+            return (None, None, None, None, None, None, None)
         elif data[0] == 0xE5:
-            return (False, None, None, None, None, None)
+            return (False, None, None, None, None, None, None)
+        try:
+            modified = self._edt_to_pdt(data[0x16:0x1A])
+        except:
+            modified = datetime.datetime(1988, 1, 1, 12, 0, 0)
+        filename = self._efn_to_cfn(data[:0x0B])
+        load_address = data[0x10]*256 + data[0x11]
         return (
             True,
-            self._efn_to_cfn(data[:0x0B]),
+            filename,
             data[0x0B],
-            self._edt_to_pdt(data[0x16:0x1A]),
+            modified,
             struct.unpack("<H", data[0x1A:0x1C])[0],
             struct.unpack("<I", data[0x1C:0x20])[0],
+            load_address
         )
 
-    def _makedirentry(self, filename, attributes, modified, cluster, file_size):
+    def _makedirentry(self, filename, attributes, modified, cluster, file_size, load_address):
         if type(filename) == bytes:
             ext, filename = filename[8:], filename[:8]
         else:
@@ -384,7 +391,7 @@ class FAT12:
         return (
             filename.ljust(8)
             + ext.ljust(3)
-            + bytearray([attributes, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0])
+            + bytearray([attributes, 0, 0, 0, 0, (load_address >> 8) & 0xFF, load_address & 0xFF, 0, 0, 0, 0])
             + self._pdt_to_edt(modified)
             + struct.pack("<HI", cluster, file_size)
         )
@@ -465,6 +472,7 @@ class FAT12:
                 modified,
                 cluster,
                 file_size,
+                load_address
             ) = self._parsedirentry(sector[i: i + 32])
             if exists is None:
                 break
@@ -473,7 +481,7 @@ class FAT12:
                     attributes & 0xC8 != 0
                 ):  # volume label or device... or something else like that
                     continue
-                yield (filename, attributes, modified, cluster, file_size)
+                yield (filename, attributes, modified, cluster, file_size, load_address)
 
     def _allocdirentrycluster(self, sector, offset=0):
         assert offset % 32 == 0
@@ -560,6 +568,7 @@ class FAT12:
                 modified,
                 cluster,
                 file_size,
+                load_address
             ) = self._parsedirentry(sector[i: i + 32])
             if exists is None:
                 break
@@ -583,6 +592,7 @@ class FAT12:
                 modified,
                 cluster,
                 file_size,
+                load_address
             ) = self._parsedirentry(sector[i: i + 32])
             if exists is None:
                 break
@@ -707,7 +717,7 @@ class FAT12:
             if entry is None:
                 return None, []
             parents.append(cluster)
-            exists, filename, attributes, modified, cluster, file_size = entry
+            exists, filename, attributes, modified, cluster, file_size, load_address = entry
             if exists is not True:
                 return None, []
             if attributes & 0x10 == 0:
@@ -748,7 +758,7 @@ class FAT12:
             entry = self._parsedirentry(self._readdirentry(ocluster, offset))
             if entry is None:
                 return (None, None, None)
-            exists, filename, attributes, modified, scluster, file_size = entry
+            exists, filename, attributes, modified, scluster, file_size, load_address = entry
             if exists is not True:
                 return (None, None, None)
             if attributes & 0x10 == 0:
@@ -767,6 +777,7 @@ class FAT12:
             modified,
             cluster,
             file_size,
+            load_address
         ) in self._allfilesincluster(dcluster):
             if i < 2 and filename[0] == ".":
                 continue
@@ -797,7 +808,7 @@ class FAT12:
             entry = self._parsedirentry(self._readdirentry(ocluster, offset))
             if entry is None:
                 return (None, None, None)
-            exists, filename, attributes, modified, scluster, file_size = entry
+            exists, filename, attributes, modified, scluster, file_size, load_address = entry
             if exists is not True:
                 return (None, None, None)
             if attributes & 0x10 == 0:
@@ -879,9 +890,10 @@ class FAT12:
             modified,
             cluster,
             file_size,
+            load_address
         ) in self._allfilesincluster(cluster):
             if attributes & 0x10 == 0 and (hidden or (attributes & 2) == 0):
-                yield FAT12FileInfo(filename, attributes, modified, cluster, file_size)
+                yield FAT12FileInfo(filename, attributes, modified, cluster, file_size, load_address)
 
     def listdirs(self, path, hidden=False):
         """Lists the directories in a current directory.
@@ -899,9 +911,10 @@ class FAT12:
             modified,
             cluster,
             file_size,
+            load_address
         ) in self._allfilesincluster(cluster):
             if attributes & 0x10 != 0 and (hidden or (attributes & 2) != 0):
-                yield FAT12FileInfo(filename, attributes, None, cluster, None)
+                yield FAT12FileInfo(filename, attributes, None, cluster, None, None)
 
     def stat(self, path):
         """Returns information about a file.
@@ -919,6 +932,7 @@ class FAT12:
             modified,
             cluster,
             file_size,
+            load_address
         ) = self._parsedirentry(self._readdirentry(fcluster, foffset))
         is_dir = attributes & 0x10 != 0
         return FAT12FileInfo(
@@ -927,9 +941,10 @@ class FAT12:
             modified if not is_dir else None,
             cluster,
             file_size if not is_dir else None,
+            load_address
         )
 
-    def _readfile(self, fcluster, foffset):
+    def _readfile(self, fcluster, foffset, with_load_address = True):
         bps = self.bytes_per_sector
         bpc = bps * self.sectors_per_cluster
         (
@@ -939,26 +954,31 @@ class FAT12:
             modified,
             cluster,
             file_size,
+            load_address
         ) = self._parsedirentry(self._readdirentry(fcluster, foffset))
         is_dir = attributes & 0x10 != 0
         if is_dir:
             raise ValueError("cannot read a directory")
         data = bytearray()
+        if with_load_address:
+            load_address = 0 or load_address
+            data += load_address.to_bytes(length=2, byteorder="little")
         for i in range(0, file_size, bpc):
             data += self._readcluster(cluster)[: file_size - i]
             cluster = self._fat[cluster]
         return data
 
-    def read_file(self, path):
+    def read_file(self, path, with_load_address = True):
         """Reads and returns the contents of a file.
 
         Arguments:
         path -- the file path
+        with_load_address -- prepend data stream with load address
         """
         cluster, fcluster, foffset = self._resolvepath(path, False)
         if cluster is None:
             raise FileNotFoundError(path)
-        return self._readfile(fcluster, foffset)
+        return self._readfile(fcluster, foffset, with_load_address)
 
     def _writefile(self, fcluster, foffset, contents, ignore_readonly):
         bps = self.bytes_per_sector
@@ -970,6 +990,7 @@ class FAT12:
             modified,
             cluster,
             file_size,
+            load_address
         ) = self._parsedirentry(self._readdirentry(fcluster, foffset))
         is_dir = attributes & 0x10 != 0
         if is_dir:
@@ -1022,7 +1043,9 @@ class FAT12:
             fcluster,
             foffset,
             self._makedirentry(filename, attributes, None,
-                               cluster, new_file_size),
+                               cluster, new_file_size,
+                               load_address
+                               ),
         )
         self.commit()
 
@@ -1065,6 +1088,7 @@ class FAT12:
             modified,
             cluster,
             file_size,
+            load_address
         ) = self._parsedirentry(self._readdirentry(fcluster, foffset))
         is_dir = attributes & 0x10 != 0
 
@@ -1076,7 +1100,7 @@ class FAT12:
             fcluster,
             foffset,
             self._makedirentry(filename, attributes,
-                               modified, cluster, file_size),
+                               modified, cluster, file_size, load_address),
         )
 
     def delete_file(self, path, ignore_readonly=False):
@@ -1099,6 +1123,7 @@ class FAT12:
             modified,
             cluster,
             file_size,
+            load_address
         ) = self._parsedirentry(self._readdirentry(fcluster, foffset))
         is_dir = attributes & 0x10 != 0
         if is_dir:
@@ -1188,6 +1213,7 @@ class FAT12:
             modified,
             cluster,
             file_size,
+            load_address
         ) = self._parsedirentry(self._readdirentry(fcluster, foffset))
         is_dir = attributes & 0x10 != 0
         if dcluster != 1 and filename in [".", ".."]:
@@ -1196,7 +1222,7 @@ class FAT12:
         self._writedirentry(
             fcluster,
             foffset,
-            self._makedirentry(name, attributes, modified, cluster, file_size),
+            self._makedirentry(name, attributes, modified, cluster, file_size, load_address),
         )
 
     def move(self, path, folder):
@@ -1226,6 +1252,7 @@ class FAT12:
             modified,
             cluster,
             file_size,
+            load_address
         ) = self._parsedirentry(oentry)
         is_dir = attributes & 0x10 != 0
 
@@ -1263,6 +1290,7 @@ class FAT12:
                 modified,
                 cluster,
                 file_size,
+                load_address
             ) = self._parsedirentry(self._readdirentry(fcluster, foffset))
             return attributes & 0x10 == 0
 
@@ -1316,6 +1344,7 @@ class FAT12:
             modified,
             cluster,
             file_size,
+            load_address
         ) = self._parsedirentry(self._readdirentry(sfcluster, sfoffset))
         dattributes = self._parsedirentry(
             self._readdirentry(dfcluster, dfoffset))[2]
@@ -1352,16 +1381,18 @@ class FAT12FileInfo:
     date -- The modification date of this file.
     size -- The size of this file in bytes.
     starting_cluster -- The first FAT cluster to contain the contents of this file.
+    load_address -- DD-001 load address
     """
 
-    def __init__(self, name, attributes, date, cluster, size):
-        self.name, self.attributes, self.date, self.starting_cluster, self.size = (
+    def __init__(self, name, attributes, date, cluster, size, load_address):
+        self.name, self.attributes, self.date, self.starting_cluster, self.size, self.load_address = (
             name,
             attributes,
             date,
             cluster,
             size,
+            load_address
         )
 
     def __repr__(self):
-        return f'<"{self.name}", {self.size}>'
+        return f'<"{self.name}", {self.size}, {self.load_address}>'
